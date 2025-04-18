@@ -290,44 +290,6 @@ add_dependencies(mold git_hash)
 configure_file(common/config.h.in config.h)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-# Almost all functions are template in mold which take a target type
-# (e.g. X86_64) as its type parameter. Since we suport more than 10
-# targets, compiling a single source file for all the targets is very
-# slow.
-#
-# As a workaround, we create a .cc file for each target and spawn many
-# compiler instances. This is hacky but greatly reduces compile time
-# on a multicore machine.
-list(APPEND MOLD_ELF_TARGETS
-  X86_64 I386 ARM64 ARM32 RV32LE RV32BE RV64LE RV64BE PPC32 PPC64V1 PPC64V2
-  S390X SPARC64 M68K SH4 ALPHA LOONGARCH32 LOONGARCH64)
-
-list(APPEND MOLD_ELF_TEMPLATE_FILES
-  elf/arch-loongarch.cc
-  elf/arch-riscv.cc
-  elf/cmdline.cc
-  elf/gc-sections.cc
-  elf/gdb-index.cc
-  elf/icf.cc
-  elf/input-files.cc
-  elf/input-sections.cc
-  elf/linker-script.cc
-  elf/main.cc
-  elf/mapfile.cc
-  elf/output-chunks.cc
-  elf/passes.cc
-  elf/relocatable.cc
-  elf/subprocess.cc
-  elf/thunks.cc
-  elf/tls.cc
-  )
-
-if(WIN32)
-  list(APPEND MOLD_ELF_TEMPLATE_FILES elf/lto-win32.cc)
-else()
-  list(APPEND MOLD_ELF_TEMPLATE_FILES elf/lto-unix.cc)
-endif()
-
 function(mold_instantiate_templates SOURCE TARGET)
   set(PATH ${CMAKE_BINARY_DIR}/${SOURCE}.${TARGET}.cc)
   if(NOT EXISTS ${PATH})
@@ -339,11 +301,99 @@ function(mold_instantiate_templates SOURCE TARGET)
   target_sources(mold PRIVATE ${PATH})
 endfunction()
 
-foreach (SOURCE IN LISTS MOLD_ELF_TEMPLATE_FILES)
-  foreach(TARGET IN LISTS MOLD_ELF_TARGETS)
-    mold_instantiate_templates(${SOURCE} ${TARGET})
+
+if (MOLD_ENABLE_ELF)
+
+  # Almost all functions are template in mold which take a target type
+  # (e.g. X86_64) as its type parameter. Since we suport more than 10
+  # targets, compiling a single source file for all the targets is very
+  # slow.
+  #
+  # As a workaround, we create a .cc file for each target and spawn many
+  # compiler instances. This is hacky but greatly reduces compile time
+  # on a multicore machine.
+  list(APPEND MOLD_ELF_TARGETS
+    X86_64 I386 ARM64 ARM32 RV32LE RV32BE RV64LE RV64BE PPC32 PPC64V1 PPC64V2
+    S390X SPARC64 M68K SH4 ALPHA LOONGARCH32 LOONGARCH64)
+
+  list(APPEND MOLD_ELF_TEMPLATE_FILES
+    elf/arch-loongarch.cc
+    elf/arch-riscv.cc
+    elf/cmdline.cc
+    elf/gc-sections.cc
+    elf/gdb-index.cc
+    elf/icf.cc
+    elf/input-files.cc
+    elf/input-sections.cc
+    elf/linker-script.cc
+    elf/main.cc
+    elf/mapfile.cc
+    elf/output-chunks.cc
+    elf/passes.cc
+    elf/relocatable.cc
+    elf/subprocess.cc
+    elf/thunks.cc
+    elf/tls.cc
+    )
+
+  if(WIN32)
+    list(APPEND MOLD_ELF_TEMPLATE_FILES elf/lto-win32.cc)
+  else()
+    list(APPEND MOLD_ELF_TEMPLATE_FILES elf/lto-unix.cc)
+  endif()
+
+  foreach (SOURCE IN LISTS MOLD_ELF_TEMPLATE_FILES)
+    foreach(TARGET IN LISTS MOLD_ELF_TARGETS)
+      mold_instantiate_templates(${SOURCE} ${TARGET})
+    endforeach()
   endforeach()
-endforeach()
+
+  list(APPEND MOLD_ELF_FILES
+    elf/arch-alpha.cc
+    elf/arch-arm32.cc
+    elf/arch-arm64.cc
+    elf/arch-i386.cc
+    elf/arch-m68k.cc
+    elf/arch-ppc32.cc
+    elf/arch-ppc64v1.cc
+    elf/arch-ppc64v2.cc
+    elf/arch-s390x.cc
+    elf/arch-sh4.cc
+    elf/arch-sparc64.cc
+    elf/arch-x86-64.cc
+    elf/config.cc
+    elf/elf.cc
+  )
+
+  target_sources(mold PRIVATE ${MOLD_ELF_FILES})
+endif()
+
+if (MOLD_ENABLE_PE)
+  list(APPEND MOLD_PE_TARGETS
+    X86_64
+  )
+
+  list(APPEND MOLD_PE_TEMPLATE_FILES
+    pe/main.cc
+    pe/cmdline.cc
+    pe/input-files.cc
+    pe/input-sections.cc
+    pe/passes.cc
+    pe/output-chunks.cc
+  )
+
+  foreach (SOURCE IN LISTS MOLD_PE_TEMPLATE_FILES)
+    foreach(TARGET IN LISTS MOLD_PE_TARGETS)
+      mold_instantiate_templates(${SOURCE} ${TARGET})
+    endforeach()
+  endforeach()
+
+  list(APPEND MOLD_PE_FILES
+    pe/config.cc
+  )
+
+  target_sources(mold PRIVATE ${MOLD_PE_FILES})
+endif()
 
 # Add other non-template source files.
 target_sources(mold PRIVATE
@@ -356,20 +406,6 @@ target_sources(mold PRIVATE
   common/multi-glob.cc
   common/perf.cc
   common/tar.cc
-  elf/arch-alpha.cc
-  elf/arch-arm32.cc
-  elf/arch-arm64.cc
-  elf/arch-i386.cc
-  elf/arch-m68k.cc
-  elf/arch-ppc32.cc
-  elf/arch-ppc64v1.cc
-  elf/arch-ppc64v2.cc
-  elf/arch-s390x.cc
-  elf/arch-sh4.cc
-  elf/arch-sparc64.cc
-  elf/arch-x86-64.cc
-  elf/config.cc
-  elf/elf.cc
   git-hash.cc
   third-party/rust-demangle/rust-demangle.c
   )

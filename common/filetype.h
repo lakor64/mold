@@ -21,6 +21,9 @@ enum class FileType {
   TEXT,
   GCC_LTO_OBJ,
   LLVM_BITCODE,
+  PE_OBJ,
+  PE_EXE,
+  MZ_EXE,
 };
 
 template <typename MappedFile>
@@ -32,6 +35,25 @@ bool is_text_file(MappedFile *mf) {
   u8 *data = mf->data;
   return mf->size >= 4 && istext(data[0]) && istext(data[1]) &&
          istext(data[2]) && istext(data[3]);
+}
+
+template <typename MACHINE>
+bool check_pe_coff_machine(const u8* d)
+{
+    return d[0] == (MACHINE::MachineType & 0xFF) && d[1] == (MACHINE::MachineType >> 8);
+}
+
+template <typename MappedFile>
+bool is_pe_coff_file(MappedFile* mf) {
+    u8* data = mf->data;
+    if (mf->size < 20)
+        return false;
+    
+    // COFF PE doesn't have magic files, assume we check by header
+    if (check_pe_coff_machine<mold::pe::X86_64>(data))
+        return true;
+
+    return *((u32*)(data + 4)) > 0; // is timestamp > 0? Should always be
 }
 
 template <typename E, typename Context, typename MappedFile>
@@ -165,6 +187,26 @@ FileType get_file_type(Context &ctx, MappedFile *mf) {
     return FileType::LLVM_BITCODE;
   if (data.starts_with("BC\xc0\xde"))
     return FileType::LLVM_BITCODE;
+  if (data.starts_with("MZ"))
+  {
+    if (data.size() > 0x3c)
+    {
+      ul32 pe_start = *(const ul32*)(data.data() + 0x3c);
+      const u8* pe_ptr = (const u8*)(data.data() + pe_start);
+
+      if (data.size() > (pe_start + 4))
+      {
+        ul32 pe_magic = *(const ul32*)pe_ptr;
+        if (pe_magic == 0x4550) // PE\0\0
+          return FileType::PE_EXE;
+      }
+
+      return FileType::MZ_EXE;
+    }
+
+  }
+  if (is_pe_coff_file(mf))
+      return FileType::PE_OBJ;
   return FileType::UNKNOWN;
 }
 
@@ -185,6 +227,9 @@ inline std::string filetype_to_string(FileType type) {
   case FileType::TEXT: return "TEXT";
   case FileType::GCC_LTO_OBJ: return "GCC_LTO_OBJ";
   case FileType::LLVM_BITCODE: return "LLVM_BITCODE";
+  case FileType::PE_OBJ: return "PE_OBJ";
+  case FileType::PE_EXE: return "PE_EXE";
+  case FileType::MZ_EXE: return "MZ_EXE";
   }
   return "UNKNOWN";
 }
